@@ -4,10 +4,16 @@ import (
 	"asynchronous-encryption-go/encryption"
 	"crypto/rsa"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	AMOUNT_MINIMUM = 4000
 )
 
 type PurchaseRequest struct {
@@ -58,6 +64,7 @@ func main() {
 			return
 		}
 
+
 		decryptedAmount, err := encryption.DecryptAmount(encryptedAmount, privateKey)
 		if err != nil {
 			log.Printf("Failed to decrypt amount: %v", err)
@@ -65,8 +72,23 @@ func main() {
 			return
 		}
 
+		amountStr := string(decryptedAmount)
+
+		amount, err := strconv.ParseFloat(amountStr, 64)
+		if err != nil {
+			fmt.Println("Error parsing float:", err)
+			return
+		}
+
+		if amount < AMOUNT_MINIMUM {
+			log.Println("amount too low ", amount)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Amount too low"})
+			return
+		}
+
+		
 		c.JSON(http.StatusOK, PurchaseResponse{
-			DecryptedAmount: string(decryptedAmount),
+			DecryptedAmount: amountStr,
 		})
 	})
 
