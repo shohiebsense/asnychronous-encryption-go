@@ -3,8 +3,11 @@ package main
 import (
 	"asynchronous-encryption-go/encryption"
 	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -37,9 +40,51 @@ func init() {
 }
 
 func main() {
+
+	cert, err := tls.LoadX509KeyPair("experimental/server.crt", "experimental/server.key")
+	if err != nil {
+		log.Fatalf("server: loadkeys: %s", err)
+	}
+
+	// Load CA cert to verify client certificates
+	caCert, err := ioutil.ReadFile("experimental/ca.crt")
+	if err != nil {
+		log.Fatalf("server: read ca cert: %s", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	
 	r := gin.Default()
 
 	r.GET("/public-key", func(c *gin.Context) {
+
+		if c.Request.TLS != nil {
+			log.Println("TLS connection")
+			clientCert := c.Request.TLS.PeerCertificates
+		
+
+			if len(clientCert) <= 0 {
+				log.Println("No client certificate")
+				return
+			}
+
+			if len(clientCert)> 0 {
+
+				for i, cert := range clientCert {
+					log.Printf("Certificate #%d: Subject=%s, Issuer=%s\n", i+1, cert.Subject, cert.Issuer)
+				}
+				
+				clientCertificate := clientCert[0]
+			if clientCertificate.Issuer.String() != "CN=MyCA" { // Replace "CN=MyCA" with your CA's issuer details
+				log.Println("Untrusted certificate issuer:", clientCertificate.Issuer.String())
+			} else {
+				log.Println("Certificate issuer is trusted:", clientCertificate.Issuer.String())
+			}
+			
+		}
+		}
+
 		pubPEM, err := encryption.ExportPublicKeyToPEM(publicKey)
 		if err != nil {
 			log.Printf("Failed to export public key: %v", err)
@@ -92,5 +137,19 @@ func main() {
 		})
 	})
 
-	r.Run(":8080")
+
+	server := &http.Server{
+		Addr:    ":8080", 
+		Handler: r,
+		TLSConfig: &tls.Config{
+			ClientCAs:  caCertPool,   
+			ClientAuth: tls.RequireAndVerifyClientCert, 
+			Certificates: []tls.Certificate{cert}, 
+		},
+	}
+
+	fmt.Println("Starting server on local dev")
+	if err := server.ListenAndServeTLS("", ""); err != nil {
+		log.Fatalf("server: %s", err)
+	}
 }
